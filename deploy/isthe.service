@@ -1,0 +1,42 @@
+# systemd unit for "Is the ..."
+# Install: sudo cp deploy/isthe.service /etc/systemd/system/isthe.service
+#          sudo systemctl daemon-reload
+#          sudo systemctl enable --now isthe
+# Logs:    journalctl -u isthe -f
+
+[Unit]
+Description=Is the ... status board
+After=network.target
+
+[Service]
+Type=simple
+# Adjust these to where you deploy the app and which user runs it.
+WorkingDirectory=/opt/isthe
+# systemd does NOT search $PATH and requires an executable it can run, or you
+# get 203/EXEC. `env` resolves node on systemd's default PATH (which includes
+# /usr/local/bin). If this still fails, run `which node` and hardcode that
+# absolute path here, e.g. ExecStart=/usr/local/bin/node server.js
+# (Note: if node lives under a home dir via nvm/asdf, ProtectHome=true below
+#  will hide it — use a system-wide node, or set ProtectHome=false.)
+ExecStart=/usr/bin/env node server.js
+Restart=on-failure
+RestartSec=2
+
+# --- Configuration -----------------------------------------------------------
+Environment=HOST=127.0.0.1
+Environment=PORT=8080
+Environment=DATA_FILE=/opt/isthe/data/items.json
+# CHANGE THIS. Anyone with it can edit the board.
+Environment=ADMIN_PASSWORD=change-me-please
+
+# --- Hardening (data dir must stay writable) ---------------------------------
+User=isthe
+Group=isthe
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/isthe/data
+
+[Install]
+WantedBy=multi-user.target

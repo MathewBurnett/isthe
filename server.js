@@ -1,0 +1,360 @@
+'use strict';
+
+/**
+ * "Is the ..." — a tiny status board.
+ *
+ * Zero dependencies: uses only Node's built-in modules. State is persisted to a
+ * single JSON file on disk. Meant to run behind nginx on a private network.
+ *
+ * Config via environment variables:
+ *   PORT           - port to listen on            (default 8080)
+ *   HOST           - address to bind              (default 127.0.0.1)
+ *   ADMIN_PASSWORD - password for /admin + writes (default "changeme")
+ *   DATA_FILE      - path to the JSON data file   (default ./data/items.json)
+ */
+
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+
+const PORT = Number(process.env.PORT) || 8080;
+const HOST = process.env.HOST || '127.0.0.1';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'changeme';
+const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data', 'items.json');
+const PUBLIC_DIR = path.join(__dirname, 'public');
+
+// ---------------------------------------------------------------------------
+// Data store (a JSON file; small enough to read/write whole each time)
+// ---------------------------------------------------------------------------
+
+function loadItems() {
+  try {
+    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+  } catch (err) {
+    if (err.code === 'ENOENT') return [];
+    throw err;
+  }
+}
+
+function saveItems(items) {
+  fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
+  // Write to a temp file then rename, so a crash can't corrupt the data file.
+  const tmp = DATA_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(items, null, 2));
+  fs.renameSync(tmp, DATA_FILE);
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function slugify(s) {
+  return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+// Pick black or white text for readability against a given hex background.
+function contrastText(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
+  if (!m) return '#ffffff';
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  // Relative luminance (sRGB, simple approximation).
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return lum > 0.6 ? '#111111' : '#ffffff';
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+// Validate + normalise an item coming from the admin UI. Returns [item, error].
+function normalizeItem(input, existing) {
+  if (!input || typeof input !== 'object') return [null, 'invalid body'];
+
+  const label = String(input.label || '').trim();
+  if (!label) return [null, 'label is required'];
+
+  let slug = slugify(input.slug || label);
+  if (!slug) return [null, 'could not derive a slug'];
+
+  const opts = Array.isArray(input.options) ? input.options : [];
+  if (opts.length !== 2) return [null, 'exactly two options are required'];
+
+  const options = opts.map((o) => {
+    const word = String((o && o.word) || '').trim();
+    let bg = String((o && o.bg) || '').trim();
+    if (!/^#?[0-9a-f]{6}$/i.test(bg)) bg = '#888888';
+    if (bg[0] !== '#') bg = '#' + bg;
+    return { word: word || '—', bg: bg.toLowerCase() };
+  });
+
+  let active = Number(input.active);
+  if (active !== 0 && active !== 1) active = existing ? existing.active : 0;
+
+  return [{ slug, label, options, active }, null];
+}
+
+function findItem(items, slug) {
+  return items.find((it) => it.slug === slug);
+}
+
+// ---------------------------------------------------------------------------
+// HTTP helpers
+// ---------------------------------------------------------------------------
+
+function sendJson(res, status, obj) {
+  const body = JSON.stringify(obj);
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  res.end(body);
+}
+
+function sendText(res, status, text, type) {
+  res.writeHead(status, { 'Content-Type': type || 'text/plain; charset=utf-8' });
+  res.end(text);
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (chunk) => {
+      data += chunk;
+      if (data.length > 1e6) reject(new Error('body too large'));
+    });
+    req.on('end', () => {
+      if (!data) return resolve({});
+      try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
+    });
+    req.on('error', reject);
+  });
+}
+
+function isAuthed(req) {
+  return req.headers['x-admin-token'] === ADMIN_PASSWORD;
+}
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+};
+
+function serveStatic(res, file) {
+  const full = path.join(PUBLIC_DIR, file);
+  // Prevent path traversal outside PUBLIC_DIR.
+  if (!full.startsWith(PUBLIC_DIR)) return sendText(res, 403, 'forbidden');
+  fs.readFile(full, (err, buf) => {
+    if (err) return sendText(res, 404, 'not found');
+    sendText(res, 200, buf, MIME[path.extname(full)] || 'application/octet-stream');
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Server-rendered item page (full-screen colour, no white flash)
+// ---------------------------------------------------------------------------
+
+function renderItemPage(item) {
+  const opt = item.options[item.active] || item.options[0];
+  const bg = opt.bg;
+  const fg = contrastText(bg);
+  const word = escapeHtml(opt.word);
+  const label = escapeHtml(item.label);
+  const title = escapeHtml(`Is the ${item.label}?`);
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>${title}</title>
+<style>
+  html,body{height:100%;margin:0}
+  body{
+    background:${bg};color:${fg};
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    text-align:center;padding:1.5rem;box-sizing:border-box;
+    transition:background .3s ease;
+  }
+  .q{font-size:clamp(1rem,4vw,1.75rem);opacity:.85;font-weight:500;margin:0 0 .4em}
+  .word{font-size:clamp(3rem,18vw,11rem);font-weight:800;line-height:1;letter-spacing:-.02em;margin:0}
+  .home{position:fixed;top:1rem;left:1.1rem;color:inherit;opacity:.7;text-decoration:none;font-size:.95rem}
+  .home:hover{opacity:1}
+  .word{transition:opacity .2s ease}
+</style>
+</head>
+<body>
+  <a class="home" href="/">← Is the …</a>
+  <p class="q">Is the ${label}?</p>
+  <p class="word">${word}</p>
+<script>
+(function () {
+  // Live auto-refresh: re-fetch this item's status and update in place.
+  var slug = ${JSON.stringify(item.slug)};
+  var current = ${item.active};        // index currently shown
+  var INTERVAL = 4000;                 // ms between polls when tab is visible
+  var timer = null;
+
+  function contrastText(hex) {
+    var m = /^#?([0-9a-f]{6})$/i.exec((hex || '').trim());
+    if (!m) return '#fff';
+    var n = parseInt(m[1], 16), r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.6 ? '#111' : '#fff';
+  }
+
+  function apply(item) {
+    var opt = item.options[item.active] || item.options[0];
+    var fg = contrastText(opt.bg);
+    document.body.style.background = opt.bg;
+    document.body.style.color = fg;
+    var wordEl = document.querySelector('.word');
+    if (wordEl.textContent !== opt.word) {
+      wordEl.style.opacity = '0';
+      setTimeout(function () { wordEl.textContent = opt.word; wordEl.style.opacity = '1'; }, 150);
+    }
+    document.querySelector('.q').textContent = 'Is the ' + item.label + '?';
+    document.title = 'Is the ' + item.label + '?';
+    current = item.active;
+  }
+
+  function poll() {
+    fetch('/api/items/' + slug, { cache: 'no-store' })
+      .then(function (r) {
+        if (r.status === 404) { location.reload(); return null; } // item removed
+        return r.ok ? r.json() : null;
+      })
+      .then(function (item) {
+        // apply() is idempotent, so this also reflects live edits to
+        // an option's word/colour, not just a toggle of which is active.
+        if (item) apply(item);
+      })
+      .catch(function () { /* ignore transient errors; try again next tick */ });
+  }
+
+  function start() { if (!timer) timer = setInterval(poll, INTERVAL); }
+  function stop() { if (timer) { clearInterval(timer); timer = null; } }
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) stop();
+    else { poll(); start(); }   // refresh immediately on return, then resume
+  });
+
+  if (!document.hidden) start();
+})();
+</script>
+</body>
+</html>`;
+}
+
+// ---------------------------------------------------------------------------
+// Router
+// ---------------------------------------------------------------------------
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://localhost');
+  const pathname = decodeURIComponent(url.pathname);
+  const method = req.method;
+
+  try {
+    // ---- API -------------------------------------------------------------
+    // Lets the admin UI verify a password without mutating anything.
+    if (pathname === '/api/auth' && method === 'POST') {
+      return isAuthed(req)
+        ? sendJson(res, 200, { ok: true })
+        : sendJson(res, 401, { error: 'unauthorized' });
+    }
+
+    if (pathname === '/api/items' && method === 'GET') {
+      return sendJson(res, 200, loadItems());
+    }
+
+    if (pathname === '/api/items' && method === 'POST') {
+      if (!isAuthed(req)) return sendJson(res, 401, { error: 'unauthorized' });
+      const body = await readBody(req);
+      const items = loadItems();
+      const [item, error] = normalizeItem(body, null);
+      if (error) return sendJson(res, 400, { error });
+      if (findItem(items, item.slug)) return sendJson(res, 409, { error: 'slug already exists' });
+      items.push(item);
+      saveItems(items);
+      return sendJson(res, 201, item);
+    }
+
+    const apiMatch = /^\/api\/items\/([a-z0-9]+)(\/toggle)?$/.exec(pathname);
+    if (apiMatch) {
+      const slug = apiMatch[1];
+      const isToggle = Boolean(apiMatch[2]);
+      const items = loadItems();
+      const item = findItem(items, slug);
+
+      if (method === 'GET' && !isToggle) {
+        return item ? sendJson(res, 200, item) : sendJson(res, 404, { error: 'not found' });
+      }
+      // Everything below mutates -> requires auth.
+      if (!isAuthed(req)) return sendJson(res, 401, { error: 'unauthorized' });
+      if (!item) return sendJson(res, 404, { error: 'not found' });
+
+      if (isToggle && method === 'POST') {
+        item.active = item.active === 0 ? 1 : 0;
+        saveItems(items);
+        return sendJson(res, 200, item);
+      }
+      if (!isToggle && method === 'PUT') {
+        const body = await readBody(req);
+        const [updated, error] = normalizeItem({ ...body, slug }, item);
+        if (error) return sendJson(res, 400, { error });
+        Object.assign(item, updated, { slug }); // slug is immutable once created
+        saveItems(items);
+        return sendJson(res, 200, item);
+      }
+      if (!isToggle && method === 'DELETE') {
+        saveItems(items.filter((it) => it.slug !== slug));
+        return sendJson(res, 200, { ok: true });
+      }
+      return sendJson(res, 405, { error: 'method not allowed' });
+    }
+
+    // ---- Pages -----------------------------------------------------------
+    if (method === 'GET' || method === 'HEAD') {
+      if (pathname === '/' || pathname === '/index.html') return serveStatic(res, 'index.html');
+      if (pathname === '/admin' || pathname === '/admin.html') return serveStatic(res, 'admin.html');
+
+      // Static assets (single flat public dir).
+      if (/^\/[a-zA-Z0-9._-]+\.(css|js|svg|ico|html)$/.test(pathname)) {
+        return serveStatic(res, pathname.slice(1));
+      }
+
+      // Item pages: /fridgeclosed
+      const slug = slugify(pathname.slice(1));
+      if (slug) {
+        const item = findItem(loadItems(), slug);
+        if (item) return sendText(res, 200, renderItemPage(item), MIME['.html']);
+      }
+      return sendText(res, 404, notFoundPage(), MIME['.html']);
+    }
+
+    return sendJson(res, 405, { error: 'method not allowed' });
+  } catch (err) {
+    console.error(err);
+    return sendJson(res, 400, { error: err.message || 'bad request' });
+  }
+});
+
+function notFoundPage() {
+  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Not found</title>
+<body style="font-family:system-ui;display:flex;height:100vh;margin:0;align-items:center;justify-content:center;flex-direction:column;background:#111;color:#eee">
+<h1 style="font-size:2rem;margin:0 0 .5rem">Is the … ?</h1>
+<p style="opacity:.7">Nothing configured here yet. <a style="color:#6ab7ff" href="/">Home</a></p>
+</body>`;
+}
+
+server.listen(PORT, HOST, () => {
+  console.log(`"Is the ..." running at http://${HOST}:${PORT}  (data: ${DATA_FILE})`);
+});

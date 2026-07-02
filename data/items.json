@@ -1,0 +1,17 @@
+[
+  {
+    "slug": "fridgeclosed",
+    "label": "fridge",
+    "active": 1,
+    "options": [
+      {
+        "word": "Open",
+        "bg": "#16a34a"
+      },
+      {
+        "word": "Closed",
+        "bg": "#dc2626"
+      }
+    ]
+  }
+]

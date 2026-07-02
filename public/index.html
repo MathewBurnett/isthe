@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Is the …</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="hero">
+    <h1>Is the<span class="dots"> …</span></h1>
+    <p>A little board of yes/no things. Pick one below.</p>
+  </header>
+
+  <main id="grid" class="grid" aria-live="polite"></main>
+
+  <script>
+    function contrastText(hex) {
+      const m = /^#?([0-9a-f]{6})$/i.exec((hex || '').trim());
+      if (!m) return '#fff';
+      const n = parseInt(m[1], 16);
+      const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+      const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+      return lum > 0.6 ? '#111' : '#fff';
+    }
+
+    async function load() {
+      const grid = document.getElementById('grid');
+      let items = [];
+      try {
+        items = await (await fetch('/api/items')).json();
+      } catch (e) {
+        grid.innerHTML = '<p class="empty">Couldn’t load items.</p>';
+        return;
+      }
+      if (!items.length) {
+        grid.innerHTML = '<p class="empty">Nothing here yet. Head to <a href="/admin">/admin</a> to add something.</p>';
+        return;
+      }
+      grid.innerHTML = '';
+      for (const it of items) {
+        const opt = it.options[it.active] || it.options[0];
+        const a = document.createElement('a');
+        a.className = 'card';
+        a.href = '/' + it.slug;
+        a.style.background = opt.bg;
+        a.style.color = contrastText(opt.bg);
+        const q = document.createElement('div');
+        q.className = 'q';
+        q.textContent = 'Is the ' + it.label + '?';
+        const s = document.createElement('div');
+        s.className = 'state';
+        s.textContent = opt.word;
+        a.append(q, s);
+        grid.appendChild(a);
+      }
+    }
+    load();
+
+    // Live auto-refresh: keep the board current, but pause while the tab is hidden.
+    let timer = setInterval(load, 5000);
+    document.addEventListener('visibilitychange', () => {
+      clearInterval(timer);
+      if (!document.hidden) { load(); timer = setInterval(load, 5000); }
+    });
+  </script>
+</body>
+</html>

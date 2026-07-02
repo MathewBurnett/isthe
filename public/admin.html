@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin · Is the …</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- Password gate -->
+  <section id="gate" class="gate" hidden>
+    <h1>Is the … · admin</h1>
+    <form id="gate-form" autocomplete="on">
+      <!-- Hidden username helps password managers associate/save the entry -->
+      <input type="text" name="username" value="admin" autocomplete="username" hidden>
+      <div class="field">
+        <input id="pw" type="password" name="password" placeholder="Admin password"
+               autocomplete="current-password">
+      </div>
+      <button class="btn primary" id="pw-go" type="submit">Enter</button>
+    </form>
+    <p class="hint">Set on the server via the <code>ADMIN_PASSWORD</code> env var.</p>
+  </section>
+
+  <!-- App -->
+  <div id="app" class="wrap" hidden>
+    <div class="topbar">
+      <h1>Manage items</h1>
+      <div class="row">
+        <a href="/" target="_blank">View site ↗</a>
+        <button class="btn ghost" id="logout">Lock</button>
+      </div>
+    </div>
+
+    <div id="list"></div>
+
+    <div class="form">
+      <h2 id="form-title">Add an item</h2>
+      <input type="hidden" id="edit-slug" value="">
+      <div class="field">
+        <label for="f-label">Label — the thing being asked about</label>
+        <input id="f-label" type="text" placeholder="fridge">
+        <p class="hint">Shown as “Is the <em>label</em>?”. The URL slug is made from this (or override below).</p>
+      </div>
+      <div class="field">
+        <label for="f-slug">URL slug (optional)</label>
+        <input id="f-slug" type="text" placeholder="fridgeclosed">
+        <p class="hint">Page will live at <code id="slug-preview">/fridgeclosed</code>. Letters and numbers only.</p>
+      </div>
+
+      <div class="field">
+        <label>Option A</label>
+        <div class="opt-row">
+          <div class="field"><label for="f-word-0">Word</label><input id="f-word-0" type="text" placeholder="Open" value="Open"></div>
+          <div><label class="hint" for="f-bg-0">Colour</label><br><input id="f-bg-0" type="color" value="#16a34a"></div>
+        </div>
+      </div>
+      <div class="field">
+        <label>Option B</label>
+        <div class="opt-row">
+          <div class="field"><label for="f-word-1">Word</label><input id="f-word-1" type="text" placeholder="Closed" value="Closed"></div>
+          <div><label class="hint" for="f-bg-1">Colour</label><br><input id="f-bg-1" type="color" value="#dc2626"></div>
+        </div>
+      </div>
+
+      <div class="row">
+        <button class="btn primary" id="save">Add item</button>
+        <button class="btn ghost" id="cancel" hidden>Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    let TOKEN = sessionStorage.getItem('isthe_token') || '';
+
+    const $ = (id) => document.getElementById(id);
+    const gate = $('gate'), app = $('app');
+
+    function toast(msg) {
+      const t = $('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2600);
+    }
+
+    function contrastText(hex) {
+      const m = /^#?([0-9a-f]{6})$/i.exec((hex || '').trim());
+      if (!m) return '#fff';
+      const n = parseInt(m[1], 16);
+      const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+      return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.6 ? '#111' : '#fff';
+    }
+
+    async function api(method, path, body) {
+      const res = await fetch(path, {
+        method,
+        headers: { 'Content-Type': 'application/json', 'x-admin-token': TOKEN },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (res.status === 401) { lock(); throw new Error('unauthorized'); }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      return data;
+    }
+
+    function showApp() { gate.hidden = true; app.hidden = false; render(); }
+    function lock() {
+      TOKEN = '';
+      sessionStorage.removeItem('isthe_token');
+      app.hidden = true; gate.hidden = false;
+    }
+
+    async function tryLogin(pw) {
+      TOKEN = pw;
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'x-admin-token': TOKEN },
+      });
+      if (!res.ok) {
+        if (pw) toast('Wrong password');
+        TOKEN = '';
+        sessionStorage.removeItem('isthe_token');
+        return false;
+      }
+      sessionStorage.setItem('isthe_token', TOKEN);
+      return true;
+    }
+
+    // ---- Rendering ----
+    async function render() {
+      const list = $('list');
+      let items = [];
+      try { items = await (await fetch('/api/items')).json(); }
+      catch (e) { list.innerHTML = '<p class="hint">Could not load items.</p>'; return; }
+
+      if (!items.length) {
+        list.innerHTML = '<p class="hint">No items yet — add your first below.</p>';
+        return;
+      }
+      list.innerHTML = '';
+      for (const it of items) {
+        const opt = it.options[it.active] || it.options[0];
+        const el = document.createElement('div');
+        el.className = 'item';
+
+        const info = document.createElement('div');
+        info.className = 'info';
+        info.innerHTML = '<div class="label"></div><div class="slug">Is the … · <code></code></div>';
+        info.querySelector('.label').textContent = it.label;
+        info.querySelector('code').textContent = '/' + it.slug;
+
+        const pill = document.createElement('button');
+        pill.className = 'pill';
+        pill.style.background = opt.bg;
+        pill.style.color = contrastText(opt.bg);
+        pill.textContent = opt.word;
+        pill.title = 'Click to toggle';
+        pill.onclick = async () => {
+          try { await api('POST', '/api/items/' + it.slug + '/toggle'); render(); }
+          catch (e) { toast(e.message); }
+        };
+
+        const actions = document.createElement('div');
+        actions.className = 'row';
+        const edit = document.createElement('button');
+        edit.className = 'btn ghost';
+        edit.textContent = 'Edit';
+        edit.onclick = () => startEdit(it);
+        const del = document.createElement('button');
+        del.className = 'btn ghost danger';
+        del.textContent = 'Delete';
+        del.onclick = async () => {
+          if (!confirm('Delete “' + it.label + '”?')) return;
+          try { await api('DELETE', '/api/items/' + it.slug); render(); }
+          catch (e) { toast(e.message); }
+        };
+        actions.append(edit, del);
+
+        el.append(info, pill, actions);
+        list.appendChild(el);
+      }
+    }
+
+    // ---- Form ----
+    function readForm() {
+      return {
+        label: $('f-label').value,
+        slug: $('f-slug').value,
+        active: 0,
+        options: [
+          { word: $('f-word-0').value, bg: $('f-bg-0').value },
+          { word: $('f-word-1').value, bg: $('f-bg-1').value },
+        ],
+      };
+    }
+
+    function resetForm() {
+      $('edit-slug').value = '';
+      $('f-label').value = '';
+      $('f-slug').value = '';
+      $('f-word-0').value = 'Open';  $('f-bg-0').value = '#16a34a';
+      $('f-word-1').value = 'Closed'; $('f-bg-1').value = '#dc2626';
+      $('form-title').textContent = 'Add an item';
+      $('save').textContent = 'Add item';
+      $('cancel').hidden = true;
+      updateSlugPreview();
+    }
+
+    function startEdit(it) {
+      $('edit-slug').value = it.slug;
+      $('f-label').value = it.label;
+      $('f-slug').value = it.slug;
+      $('f-word-0').value = it.options[0].word; $('f-bg-0').value = it.options[0].bg;
+      $('f-word-1').value = it.options[1].word; $('f-bg-1').value = it.options[1].bg;
+      $('form-title').textContent = 'Edit “' + it.label + '”';
+      $('save').textContent = 'Save changes';
+      $('cancel').hidden = false;
+      updateSlugPreview();
+      $('f-label').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    function updateSlugPreview() {
+      const raw = $('f-slug').value || $('f-label').value;
+      const slug = raw.toLowerCase().replace(/[^a-z0-9]+/g, '');
+      $('slug-preview').textContent = '/' + (slug || '…');
+    }
+
+    async function save() {
+      const editing = $('edit-slug').value;
+      const body = readForm();
+      try {
+        if (editing) await api('PUT', '/api/items/' + editing, body);
+        else await api('POST', '/api/items', body);
+        resetForm();
+        render();
+        toast(editing ? 'Saved' : 'Added');
+      } catch (e) { toast(e.message); }
+    }
+
+    // ---- Wire up ----
+    $('gate-form').addEventListener('submit', async (e) => {
+      e.preventDefault();                 // stay a single-page app, no navigation
+      if (await tryLogin($('pw').value)) showApp();
+      // Let the browser's password manager notice the successful submit.
+    });
+    $('logout').onclick = lock;
+    $('save').onclick = save;
+    $('cancel').onclick = resetForm;
+    $('f-label').addEventListener('input', updateSlugPreview);
+    $('f-slug').addEventListener('input', updateSlugPreview);
+
+    // Boot: if we have a stored token, verify it; otherwise show the gate.
+    (async () => {
+      if (TOKEN && await tryLogin(TOKEN)) showApp();
+      else lock();
+    })();
+  </script>
+</body>
+</html>
