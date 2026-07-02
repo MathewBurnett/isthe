@@ -23,6 +23,19 @@ body {
 
 a { color: var(--accent); }
 
+/* Subtle admin cog, top-right — barely lifted off the background */
+.cog {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  color: #656870;              /* grey, only a touch above the --bg black */
+  line-height: 0;
+  padding: .35rem;
+  transition: color .15s ease;
+  z-index: 10;
+}
+.cog:hover, .cog:focus-visible { color: var(--muted); }
+
 /* ---- Landing hero ---- */
 .hero {
   min-height: 60vh;
