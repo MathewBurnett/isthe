@@ -95,15 +95,41 @@ Text colour (black/white) is chosen automatically for contrast against `bg`.
 
 ### API
 
-| Method + path                  | Auth | Purpose                   |
-| ------------------------------ | ---- | ------------------------- |
-| `GET /api/items`               | no   | List all items            |
-| `GET /api/items/:slug`         | no   | One item                  |
-| `POST /api/auth`               | yes  | Verify the admin password |
-| `POST /api/items`              | yes  | Create an item            |
-| `PUT /api/items/:slug`         | yes  | Update an item            |
-| `POST /api/items/:slug/toggle` | yes  | Flip its state            |
-| `DELETE /api/items/:slug`      | yes  | Delete an item            |
+| Method + path                          | Auth     | Purpose                          |
+| -------------------------------------- | -------- | -------------------------------- |
+| `GET /api/items`                       | no       | List all items                   |
+| `GET /api/items/:slug`                 | no       | One item                         |
+| `POST /api/auth`                       | password | Verify the admin password        |
+| `POST /api/items`                      | password | Create an item                   |
+| `PUT /api/items/:slug`                 | password | Update an item                   |
+| `POST /api/items/:slug/toggle`         | password | Flip its state                   |
+| `DELETE /api/items/:slug`              | password | Delete an item                   |
+| `GET /api/token`                       | password | Read the automation token        |
+| `GET /api/items/:slug/state?active=0\|1` | token  | Set its state (idempotent)       |
+
+"Auth: password" = the admin password in the `x-admin-token` header. "Auth: token" =
+the automation token in the `?token=` query string (see below).
+
+## Automated state updates (the API token)
+
+To let a third party flip an item's state without giving them admin rights, the
+app mints an **API token** on first boot and stores it in `data/token.json`
+(mode `0600`, git-ignored). That token can do exactly one thing: **set an item's
+state** — it cannot create, edit, delete, or toggle anything, and it is never
+returned by any public endpoint.
+
+Hand out a ready-made URL — fetching it (a plain `GET`) sets the state:
+
+```bash
+curl "http://isthe.domain/api/items/fridgeclosed/state?token=<TOKEN>&active=1"
+```
+
+`active` must be `0` or `1` (the option index); the call is idempotent, so retries
+and repeats are safe. It returns the updated item as JSON.
+
+Grab the token and copy-ready per-item URLs from **/admin** — click the key icon
+in the top bar to reveal a link for each item + state. Break-glass rotation:
+stop the service, delete `data/token.json`, restart (a fresh token is minted).
 
 ## Notes / security
 
@@ -111,5 +137,9 @@ Text colour (black/white) is chosen automatically for contrast against `bg`.
   trusted LAN. If you expose this beyond your network, terminate **TLS** in nginx
   (a commented HTTPS block is in the site config) and/or restrict `/admin` by IP
   (also commented in the config).
+- The **API token travels in the URL query string**, so it lands in nginx
+  `access.log`, browser history, and `Referer` headers. That's an accepted
+  trade for a LAN toy (dumb clients only need to fetch a link); don't expose the
+  token URLs to the public internet.
 - State is a single JSON file written atomically (temp file + rename), so a crash
   mid-write won't corrupt it. Back it up by copying `data/items.json`.

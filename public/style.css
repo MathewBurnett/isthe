@@ -89,6 +89,43 @@ a { color: var(--accent); }
 .topbar h1 { font-size: 1.6rem; margin: 0; }
 .topbar a { font-size: .95rem; }
 
+/* Subtle icon button in the admin topbar (echoes the landing cog) */
+.icon-btn {
+  background: transparent;
+  border: none;
+  color: #656870;
+  line-height: 0;
+  padding: .3rem;
+  cursor: pointer;
+  transition: color .15s ease;
+}
+.icon-btn:hover, .icon-btn:focus-visible { color: var(--muted); }
+
+/* Automation URLs panel */
+.webhooks {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.25rem;
+  margin-bottom: 1.5rem;
+}
+.webhooks h2 { margin: 0 0 .35rem; font-size: 1.15rem; }
+.token-line { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin: .75rem 0 1rem; }
+.token-line code {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+  padding: .3rem .55rem; font-size: .85rem; color: var(--accent); word-break: break-all;
+}
+.wh-item { border-top: 1px solid var(--line); padding-top: .8rem; margin-top: .8rem; }
+.wh-item:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+.wh-label { font-weight: 700; margin-bottom: .5rem; }
+.wh-url { display: flex; align-items: center; gap: .6rem; margin-bottom: .5rem; flex-wrap: wrap; }
+.wh-set { color: var(--muted); font-size: .8rem; min-width: 8ch; }
+.wh-url code {
+  flex: 1 1 260px; background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 8px; padding: .35rem .55rem; font-size: .8rem;
+  color: var(--text); word-break: break-all;
+}
+
 .item {
   background: var(--panel);
   border: 1px solid var(--line);
