@@ -27,10 +27,34 @@
     <div class="topbar">
       <h1>Manage items</h1>
       <div class="row">
+        <button class="icon-btn" id="webhooks-btn" type="button"
+                aria-label="Automation URLs" title="Automation URLs" aria-expanded="false">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+               stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="7.5" cy="15.5" r="5.5"></circle>
+            <path d="m10.5 12.5 8-8"></path>
+            <path d="m16 3 5 5-3 3-5-5z"></path>
+          </svg>
+        </button>
         <a href="/">View site</a>
         <button class="btn ghost" id="logout">Lock</button>
       </div>
     </div>
+
+    <!-- Automation URLs: a token-bearing link per item+state, for third parties -->
+    <section id="webhooks" class="webhooks" hidden>
+      <h2>Automation URLs</h2>
+      <p class="hint">
+        Give a third party one of these links; fetching it sets that item’s state.
+        The token is a secret — anyone with a link can flip that item.
+      </p>
+      <div class="token-line">
+        <span class="hint">Token</span>
+        <code id="wh-token">…</code>
+        <button class="btn ghost" type="button" id="wh-token-copy">Copy</button>
+      </div>
+      <div id="wh-list"></div>
+    </section>
 
     <div id="list"></div>
 
@@ -183,6 +207,67 @@
       }
     }
 
+    // ---- Automation URLs ----
+    async function copyText(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        toast('Copied');
+      } catch (e) {
+        // Fallback for non-secure contexts (plain http on a LAN).
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); toast('Copied'); }
+        catch (_) { toast('Copy failed'); }
+        ta.remove();
+      }
+    }
+
+    async function renderWebhooks() {
+      const listEl = $('wh-list');
+      let token = '', items = [];
+      try {
+        token = (await api('GET', '/api/token')).token;
+        items = await (await fetch('/api/items')).json();
+      } catch (e) { listEl.innerHTML = '<p class="hint">Could not load token.</p>'; return; }
+
+      $('wh-token').textContent = token;
+      $('wh-token-copy').onclick = () => copyText(token);
+
+      if (!items.length) {
+        listEl.innerHTML = '<p class="hint">No items yet — add one below to get its URLs.</p>';
+        return;
+      }
+      listEl.innerHTML = '';
+      for (const it of items) {
+        const block = document.createElement('div');
+        block.className = 'wh-item';
+        const h = document.createElement('div');
+        h.className = 'wh-label';
+        h.textContent = it.label;
+        block.appendChild(h);
+
+        it.options.forEach((opt, i) => {
+          const url = location.origin + '/api/items/' + it.slug +
+                      '/state?token=' + encodeURIComponent(token) + '&active=' + i;
+          const row = document.createElement('div');
+          row.className = 'wh-url';
+          const tag = document.createElement('span');
+          tag.className = 'wh-set';
+          tag.textContent = 'set to ' + (opt.word || '—');
+          const code = document.createElement('code');
+          code.textContent = url;
+          const copy = document.createElement('button');
+          copy.className = 'btn ghost';
+          copy.textContent = 'Copy';
+          copy.onclick = () => copyText(url);
+          row.append(tag, code, copy);
+          block.appendChild(row);
+        });
+        listEl.appendChild(block);
+      }
+    }
+
     // ---- Form ----
     function readForm() {
       return {
@@ -246,6 +331,13 @@
       // Let the browser's password manager notice the successful submit.
     });
     $('logout').onclick = lock;
+    $('webhooks-btn').onclick = () => {
+      const panel = $('webhooks');
+      const open = panel.hidden;            // about to open?
+      panel.hidden = !open;
+      $('webhooks-btn').setAttribute('aria-expanded', String(open));
+      if (open) renderWebhooks();           // (re)build with the latest items/token
+    };
     $('save').onclick = save;
     $('cancel').onclick = resetForm;
     $('f-label').addEventListener('input', updateSlugPreview);
