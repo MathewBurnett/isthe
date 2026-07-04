@@ -7,7 +7,8 @@ that word full-screen on the chosen colour.
 
 - **Zero dependencies** — pure Node.js (built-in `http`), no `npm install`, no build step.
 - **Shared state** — everyone sees the same status; persisted to one JSON file.
-- **Designed to sit behind nginx** on a private network.
+- **Ships as a container** — a prebuilt image on GHCR + `docker compose up` (recommended),
+  or run it bare-metal behind nginx.
 
 ## Layout
 
@@ -19,27 +20,64 @@ public/
   admin.html                  password-gated management UI
   style.css                   shared styles
 deploy/
-  isthe.nginx.conf nginx site config
+  isthe.nginx.conf            nginx site config
   isthe.service               systemd unit
+Dockerfile                    container image (node:22-alpine, non-root)
+docker-compose.yml            pulls the GHCR image and runs it
+.env.example                  template for .env (holds ADMIN_PASSWORD)
+.github/workflows/            builds + publishes the image to GHCR
 ```
 
 ## Run locally
 
 ```bash
 ADMIN_PASSWORD=secret node server.js
-# -> http://127.0.0.1:8080   (admin at /admin)
+# -> http://127.0.0.1:9000   (admin at /admin)
 ```
 
 ### Environment variables
 
 | Var              | Default             | Meaning                          |
 | ---------------- | ------------------- | -------------------------------- |
-| `PORT`           | `8080`              | Port to listen on                |
-| `HOST`           | `127.0.0.1`         | Bind address                     |
+| `PORT`           | `9000`              | Port to listen on                |
+| `HOST`           | `0.0.0.0`           | Bind address                     |
 | `ADMIN_PASSWORD` | `changeme`          | Password for `/admin` and writes |
 | `DATA_FILE`      | `./data/items.json` | Where state is stored            |
 
-## Deploy on your server (nginx + systemd)
+## Deploy with Docker (recommended)
+
+A GitHub Actions workflow (`.github/workflows/docker-publish.yml`) builds the
+image and pushes it to the GitHub Container Registry on every push to `main`
+(and on `v*` tags). The included `docker-compose.yml` **pulls** that image, so
+the host never builds anything.
+
+On the host (needs only `docker-compose.yml` and `.env.example` from this repo):
+
+```bash
+cp .env.example .env          # then edit .env — set a strong ADMIN_PASSWORD
+docker compose pull
+docker compose up -d
+# -> http://<host>:9000        (admin at /admin)
+```
+
+- **Config** — the admin password lives in `.env` (git-ignored); other settings
+  (`PORT`, `DATA_FILE`, …) are in the `environment:` block of `docker-compose.yml`.
+- **State persists** in the named `isthe-data` volume, so the board *and* the
+  auto-minted API token survive `docker compose down && up` — handed-out webhook
+  URLs keep working. Back it up by archiving that volume, or swap it for a bind
+  mount (`./data:/app/data`) if you'd rather keep the files on the host.
+- The container binds `0.0.0.0:9000` and runs as a **non-root** user.
+
+The GHCR package is **private by default**. Either make it public in the repo's
+Packages settings, or run `docker login ghcr.io` on the host with a token that
+has `read:packages` before `docker compose pull`.
+
+Prefer to build locally instead of pulling? `docker build -t isthe . && docker
+run -d -p 9000:9000 -e ADMIN_PASSWORD=secret -v isthe-data:/app/data isthe`.
+
+## Deploy bare-metal (nginx + systemd)
+
+Prefer Docker (above). If you'd rather run directly on the host:
 
 1. Copy the app to the server:
    ```bash

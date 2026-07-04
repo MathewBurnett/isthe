@@ -1,0 +1,14 @@
+# Keep the build context (and image) small. The data dir and secrets must
+# never be baked into the image — they live in a mounted volume at runtime.
+.git
+.github
+.gitignore
+data
+deploy
+node_modules
+*.md
+LICENSE
+.env
+.env.example
+*.log
+.DS_Store

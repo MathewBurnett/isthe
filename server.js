@@ -7,8 +7,8 @@
  * single JSON file on disk. Meant to run behind nginx on a private network.
  *
  * Config via environment variables:
- *   PORT           - port to listen on            (default 8080)
- *   HOST           - address to bind              (default 127.0.0.1)
+ *   PORT           - port to listen on            (default 9000)
+ *   HOST           - address to bind              (default 0.0.0.0)
  *   ADMIN_PASSWORD - password for /admin + writes (default "changeme")
  *   DATA_FILE      - path to the JSON data file   (default ./data/items.json)
  */
@@ -18,8 +18,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const PORT = Number(process.env.PORT) || 8080;
-const HOST = process.env.HOST || '127.0.0.1';
+const PORT = Number(process.env.PORT) || 9000;
+const HOST = process.env.HOST || '0.0.0.0';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'changeme';
 const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data', 'items.json');
 const TOKEN_FILE = process.env.TOKEN_FILE || path.join(__dirname, 'data', 'token.json');
