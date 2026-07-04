@@ -1,0 +1,28 @@
+# Pull-and-run compose for "Is the ..." — no local build.
+# The image is published to GHCR by .github/workflows/docker-publish.yml.
+#
+#   1. cp .env.example .env   &&   edit .env to set ADMIN_PASSWORD
+#   2. docker compose pull
+#   3. docker compose up -d
+#
+# The board + auto-minted API token persist in the named `isthe-data` volume,
+# so recreating the container keeps your state and webhook URLs intact.
+
+services:
+  isthe:
+    image: ghcr.io/mathewburnett/isthe:latest
+    container_name: isthe
+    restart: unless-stopped
+    # Holds ADMIN_PASSWORD (and anything else you add). Never commit .env.
+    env_file: .env
+    environment:
+      PORT: "9000"
+      DATA_FILE: /app/data/items.json
+      TOKEN_FILE: /app/data/token.json
+    ports:
+      - "9000:9000"
+    volumes:
+      - isthe-data:/app/data
+
+volumes:
+  isthe-data:
