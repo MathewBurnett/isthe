@@ -142,6 +142,21 @@ a { color: var(--accent); }
 .item .slug { color: var(--muted); font-size: .85rem; word-break: break-all; }
 .item .slug code { color: var(--accent); }
 
+/* An item hidden from the public board reads as dimmed in the admin list. */
+.item.is-hidden { opacity: .55; }
+.item.is-hidden .label::after {
+  content: "hidden";
+  font-size: .65rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--muted); background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 999px; padding: .1rem .5rem; margin-left: .5rem; vertical-align: middle;
+}
+
+/* Per-item show/hide toggle — echoes the topbar icon button. */
+.icon-btn.vis { border-radius: 10px; padding: .5rem; }
+.icon-btn.vis:hover, .icon-btn.vis:focus-visible { color: var(--text); }
+.icon-btn.vis.off { color: #7a6a6a; }
+.icon-btn.vis.off:hover, .icon-btn.vis.off:focus-visible { color: #ff8080; }
+
 .pill {
   display: inline-flex; align-items: center; gap: .5rem;
   padding: .5rem .9rem; border-radius: 999px; font-weight: 700; color: #fff;

@@ -41,6 +41,8 @@
         grid.innerHTML = '<p class="empty">Couldn’t load items.</p>';
         return;
       }
+      // Hidden items are dropped from the public grid; their /slug page still works.
+      items = items.filter((it) => !it.hidden);
       if (!items.length) {
         grid.innerHTML = '<p class="empty">Nothing here yet. Head to <a href="/admin">/admin</a> to add something.</p>';
         return;
