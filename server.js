@@ -123,7 +123,13 @@ function normalizeItem(input, existing) {
   let active = Number(input.active);
   if (active !== 0 && active !== 1) active = existing ? existing.active : 0;
 
-  return [{ slug, label, options, active }, null];
+  // Whether to hide this item from the landing grid. The direct /slug page
+  // still works — hiding only removes it from the public list.
+  const hidden = typeof input.hidden === 'boolean'
+    ? input.hidden
+    : (existing ? Boolean(existing.hidden) : false);
+
+  return [{ slug, label, options, active, hidden }, null];
 }
 
 function findItem(items, slug) {
@@ -345,26 +351,32 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, item);
     }
 
-    const apiMatch = /^\/api\/items\/([a-z0-9]+)(\/toggle)?$/.exec(pathname);
+    const apiMatch = /^\/api\/items\/([a-z0-9]+)(\/toggle|\/visibility)?$/.exec(pathname);
     if (apiMatch) {
       const slug = apiMatch[1];
-      const isToggle = Boolean(apiMatch[2]);
+      const action = apiMatch[2]; // undefined | '/toggle' | '/visibility'
       const items = loadItems();
       const item = findItem(items, slug);
 
-      if (method === 'GET' && !isToggle) {
+      if (method === 'GET' && !action) {
         return item ? sendJson(res, 200, item) : sendJson(res, 404, { error: 'not found' });
       }
       // Everything below mutates -> requires auth.
       if (!isAuthed(req)) return sendJson(res, 401, { error: 'unauthorized' });
       if (!item) return sendJson(res, 404, { error: 'not found' });
 
-      if (isToggle && method === 'POST') {
+      if (action === '/toggle' && method === 'POST') {
         item.active = item.active === 0 ? 1 : 0;
         saveItems(items);
         return sendJson(res, 200, item);
       }
-      if (!isToggle && method === 'PUT') {
+      // Flip whether the item shows on the landing grid (slug page unaffected).
+      if (action === '/visibility' && method === 'POST') {
+        item.hidden = !item.hidden;
+        saveItems(items);
+        return sendJson(res, 200, item);
+      }
+      if (!action && method === 'PUT') {
         const body = await readBody(req);
         const [updated, error] = normalizeItem({ ...body, slug }, item);
         if (error) return sendJson(res, 400, { error });
@@ -372,7 +384,7 @@ const server = http.createServer(async (req, res) => {
         saveItems(items);
         return sendJson(res, 200, item);
       }
-      if (!isToggle && method === 'DELETE') {
+      if (!action && method === 'DELETE') {
         saveItems(items.filter((it) => it.slug !== slug));
         return sendJson(res, 200, { ok: true });
       }
