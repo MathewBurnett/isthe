@@ -43,6 +43,7 @@ ADMIN_PASSWORD=secret node server.js
 | `HOST`           | `0.0.0.0`           | Bind address                     |
 | `ADMIN_PASSWORD` | `changeme`          | Password for `/admin` and writes |
 | `DATA_FILE`      | `./data/items.json` | Where state is stored            |
+| `TOKEN_FILE`     | `./data/token.json` | Where the API token is stored    |
 
 ## Deploy with Docker (recommended)
 
