@@ -11,6 +11,7 @@
  *   HOST           - address to bind              (default 0.0.0.0)
  *   ADMIN_PASSWORD - password for /admin + writes (default "changeme")
  *   DATA_FILE      - path to the JSON data file   (default ./data/items.json)
+ *   TOKEN_FILE     - path to the API token file   (default ./data/token.json)
  */
 
 const http = require('http');
@@ -120,8 +121,8 @@ function normalizeItem(input, existing) {
     return { word: word || '—', bg: bg.toLowerCase() };
   });
 
-  let active = Number(input.active);
-  if (active !== 0 && active !== 1) active = existing ? existing.active : 0;
+  let active = parseActive(input.active);
+  if (active === null) active = existing ? existing.active : 0;
 
   // Whether to hide this item from the landing grid. The direct /slug page
   // still works — hiding only removes it from the public list.
@@ -130,6 +131,14 @@ function normalizeItem(input, existing) {
     : (existing ? Boolean(existing.hidden) : false);
 
   return [{ slug, label, options, active, hidden }, null];
+}
+
+// An item's `active` is an index into its two options: only 0 or 1 is valid.
+// Accepts the number or string form; returns the index, or null if it's neither.
+function parseActive(value) {
+  if (value === 0 || value === '0') return 0;
+  if (value === 1 || value === '1') return 1;
+  return null;
 }
 
 function findItem(items, slug) {
@@ -341,12 +350,13 @@ const server = http.createServer(async (req, res) => {
       }
       const raw = url.searchParams.get('active');
       if (raw === null) return sendJson(res, 400, { error: 'active is required' });
-      if (raw !== '0' && raw !== '1') return sendJson(res, 400, { error: 'active must be 0 or 1' });
+      const active = parseActive(raw);
+      if (active === null) return sendJson(res, 400, { error: 'active must be 0 or 1' });
 
       const items = loadItems();
       const item = findItem(items, slug);
       if (!item) return sendJson(res, 404, { error: 'not found' });
-      item.active = Number(raw);
+      item.active = active;
       saveItems(items);
       return sendJson(res, 200, item);
     }
